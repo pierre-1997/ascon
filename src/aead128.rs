@@ -135,6 +135,14 @@ impl AEAD128 {
         // Process Plaintext
         let cipher = aead128.process_plain(plain);
 
+        println!(
+            "cipher = {{{}}}",
+            cipher[..std::cmp::min(16, cipher.len())]
+                .iter()
+                .map(|b| format!("0x{:02x}", b))
+                .collect::<Vec<String>>()
+                .join(", ")
+        );
         // Finalize
         aead128.finalize();
 
@@ -163,14 +171,13 @@ impl AEAD128 {
         aead128.finalize();
 
         let ptag = aead128.get_tag();
-
         if ptag != tag {
             eprintln!(
                 "INVALID TAG: 0x{:x}{:x} - PTAG: 0x{:x}{:x}",
-                u64::from_be_bytes(tag[0..8].try_into().unwrap()),
-                u64::from_be_bytes(tag[8..16].try_into().unwrap()),
-                u64::from_be_bytes(ptag[0..8].try_into().unwrap()),
-                u64::from_be_bytes(ptag[8..16].try_into().unwrap()),
+                u64::from_le_bytes(tag[0..8].try_into().unwrap()),
+                u64::from_le_bytes(tag[8..16].try_into().unwrap()),
+                u64::from_le_bytes(ptag[0..8].try_into().unwrap()),
+                u64::from_le_bytes(ptag[8..16].try_into().unwrap()),
             );
         }
 
@@ -236,12 +243,11 @@ impl AEAD128 {
             t1.copy_from_slice(&c[8..16]);
             self.state[1] ^= u64::from_le_bytes(t1);
 
-            out.extend_from_slice(&self.state[0].to_be_bytes());
-            out.extend_from_slice(&self.state[1].to_be_bytes());
+            out.extend_from_slice(&self.state[0].to_le_bytes());
+            out.extend_from_slice(&self.state[1].to_le_bytes());
 
-            for constant in ROUND_CONSTANTS.into_iter().take(8) {
-                self.round(constant);
-            }
+            println!(" absorb plaintext: {}", self);
+            self.do_8_rounds();
         }
 
         // Pad the last 2 chunks and do 8 rounds.
@@ -253,7 +259,7 @@ impl AEAD128 {
             t1.copy_from_slice(&remainder[0..8]);
             *pt ^= u64::from_le_bytes(t1);
 
-            out.extend_from_slice(&self.state[0].to_be_bytes());
+            out.extend_from_slice(&self.state[0].to_le_bytes());
 
             remainder = &remainder[8..];
             pt = &mut self.state[1];
@@ -262,7 +268,7 @@ impl AEAD128 {
         t1 = [0; 8];
         t1[..remainder.len()].copy_from_slice(remainder);
         *pt ^= pad_u64(u64::from_le_bytes(t1), remainder.len());
-        // to LE ?
+
         out.extend_from_slice(&(*pt).to_le_bytes()[..remainder.len()]);
 
         println!("    pad plaintext: {}", self);
@@ -273,26 +279,22 @@ impl AEAD128 {
     fn process_cipher(&mut self, cipher: &[u8]) -> Vec<u8> {
         let mut tmp_bytes = [0; 8];
         let mut t1;
-        let mut t2;
 
         let mut out = Vec::with_capacity(cipher.len());
 
         let mut iter = cipher.chunks_exact(16);
         for c in iter.by_ref() {
             tmp_bytes.copy_from_slice(&c[0..8]);
-            t1 = u64::from_be_bytes(tmp_bytes);
-            tmp_bytes.copy_from_slice(&c[8..16]);
-            t2 = u64::from_be_bytes(tmp_bytes);
-
-            out.extend_from_slice(&(self.state[0] ^ t1).to_be_bytes());
-            out.extend_from_slice(&(self.state[1] ^ t2).to_be_bytes());
-
+            t1 = u64::from_le_bytes(tmp_bytes);
+            out.extend_from_slice(&(self.state[0] ^ t1).to_le_bytes());
             self.state[0] = t1;
-            self.state[1] = t2;
 
-            for constant in ROUND_CONSTANTS.into_iter().take(8) {
-                self.round(constant);
-            }
+            tmp_bytes.copy_from_slice(&c[8..16]);
+            t1 = u64::from_le_bytes(tmp_bytes);
+            out.extend_from_slice(&(self.state[1] ^ t1).to_le_bytes());
+            self.state[1] = t1;
+
+            self.do_8_rounds();
         }
 
         // Pad the last 2 chunks and do 8 rounds.
@@ -304,12 +306,12 @@ impl AEAD128 {
             tmp_bytes.copy_from_slice(&remainder[0..8]);
 
             out.extend(
-                pt.to_be_bytes()
+                pt.to_le_bytes()
                     .iter()
                     .zip(&remainder[0..8])
                     .map(|(s, t)| s ^ t),
             );
-            *pt = u64::from_be_bytes(tmp_bytes);
+            *pt = u64::from_le_bytes(tmp_bytes);
 
             remainder = &remainder[8..];
             pt = &mut self.state[1];
@@ -317,15 +319,16 @@ impl AEAD128 {
 
         *pt = pad_u64(*pt, remainder.len());
 
-        tmp_bytes = [0; 8];
-        tmp_bytes[..remainder.len()].copy_from_slice(remainder);
+        // Store the rest of the message
+        if !remainder.is_empty() {
+            tmp_bytes = [0; 8];
+            tmp_bytes[..remainder.len()].copy_from_slice(remainder);
+            *pt ^= u64::from_le_bytes(tmp_bytes);
+            out.extend_from_slice(&(*pt).to_le_bytes()[..remainder.len()]);
 
-        out.extend(
-            remainder
-                .iter()
-                .zip((*pt).to_le_bytes())
-                .map(|(t, s)| t ^ s),
-        );
+            // Clear the trailing bytes before setting just the end
+            *pt = (*pt) & (!0u64 << (8 * remainder.len())) ^ u64::from_le_bytes(tmp_bytes);
+        }
 
         println!("   pad ciphertext: {}", self);
 
