@@ -1,3 +1,7 @@
+use rand::distributions::Alphanumeric;
+use rand::{Rng, RngCore};
+
+use crate::aead128::AEAD128;
 use crate::utils::pad_u64;
 
 #[test]
@@ -13,8 +17,41 @@ fn test_pad_u64() {
 }
 
 #[test]
-fn test_hash256() {
-    /*
+fn test_flow() {
+    let mut rng = rand::thread_rng();
+
+    // Random 20 chars plaintext
+    let plaintext: String = (&mut rng)
+        .sample_iter(&Alphanumeric)
+        .take(20)
+        .map(char::from)
+        .collect();
+    // Random 30 chars Associated data
+    let ad: String = (&mut rng)
+        .sample_iter(&Alphanumeric)
+        .take(30)
+        .map(char::from)
+        .collect();
+
+    // Random 16 bytes `key` and `nonce`.
+    let mut key = [0; 16];
+    rng.fill_bytes(&mut key);
+    let mut nonce = [0; 16];
+    rng.fill_bytes(&mut nonce);
+
+    let (cipher, tag) = AEAD128::encrypt(key, nonce, ad.as_bytes(), plaintext.as_bytes());
+    let decipher = AEAD128::decrypt(key, nonce, ad.as_bytes(), &cipher, tag);
+
+    assert!(decipher.is_some());
+
+    let decipher = decipher.unwrap();
+
+    assert_eq!(plaintext.as_bytes(), decipher);
+}
+
+/*
+#[test]
+fn _test_hash256() {
         Ascon-Hash("")
     0x 7346bc14f036e87ae03d0997913088f5f68411434b3cf8b54fa796a80d251f91
     Ascon-HashA("")
@@ -23,19 +60,19 @@ fn test_hash256() {
     0x 3375fb43372c49cbd48ac5bb6774e7cf5702f537b2cf854628edae1bd280059e
     Ascon-Hash("The quick brown fox jumps over the lazy dog.")
     0x c9744340ed476ac235dd979d12f5010a7523146ee90b57ccc4faeb864efcd048
-        */
 
     assert!(true);
 }
+        */
 
+/*
 #[test]
 fn test_xof128() {
-    /*
     Ascon-Xof("", 32)
     0x 5d4cbde6350ea4c174bd65b5b332f8408f99740b81aa02735eaefbcf0ba0339e
     Ascon-XofA("", 32)
     0x 7c10dffd6bb03be262d72fbe1b0f530013c6c4eadaabde278d6f29d579e3908d
-    */
 
     assert!(true);
 }
+    */

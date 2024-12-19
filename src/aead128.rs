@@ -1,9 +1,7 @@
-use std::u64;
-
 use crate::utils::pad_u64;
 
 #[derive(Debug)]
-struct AEAD128 {
+pub struct AEAD128 {
     key: [u64; 2],
     nonce: [u64; 2],
     state: [u64; 5],
@@ -34,7 +32,7 @@ const ROUND_CONSTANTS: [u64; 16] = [
 ];
 
 impl AEAD128 {
-    pub fn new(key: [u8; 16], nonce: [u8; 16]) -> Self {
+    fn new(key: [u8; 16], nonce: [u8; 16]) -> Self {
         let key = [
             u64::from_be_bytes([
                 key[0], key[1], key[2], key[3], key[4], key[5], key[6], key[7],
@@ -53,13 +51,21 @@ impl AEAD128 {
             ]),
         ];
 
-        let mut state = [IV, key[0], key[1], nonce[0], nonce[1]];
+        Self {
+            key,
+            nonce,
+            state: [0; 5],
+        }
+    }
 
-        for i in 0..12 {
-            Self::round(&mut state, ROUND_CONSTANTS[i]);
+    fn initialize(&mut self) {
+        self.state = [IV, self.key[0], self.key[1], self.nonce[0], self.nonce[1]];
+
+        for constant in ROUND_CONSTANTS.into_iter().take(12) {
+            Self::round(&mut self.state, constant);
         }
 
-        Self { key, nonce, state }
+        self.xor_key();
     }
 
     /*
@@ -95,22 +101,54 @@ impl AEAD128 {
         state[2] = !state[2];
     }
 
-    fn encrypt(key: [u8; 16], nonce: [u8; 16], ad: &[u8], plain: &[u8]) -> (Vec<u8>, [u8; 16]) {
+    pub fn encrypt(key: [u8; 16], nonce: [u8; 16], ad: &[u8], plain: &[u8]) -> (Vec<u8>, [u8; 16]) {
         let mut aead128 = Self::new(key, nonce);
 
-        // Key setup
-        aead128.xor_key();
+        // Initialize
+        aead128.initialize();
 
         // Process Associated Data
         aead128.process_adata(ad);
 
         // Process Plaintext
-        let cypher = aead128.process_plaintext(plain);
+        let cipher = aead128.process_plain(plain);
 
         // Finalize
         aead128.finalize();
 
-        (cypher, aead128.get_tag())
+        (cipher, aead128.get_tag())
+    }
+
+    /// Returns `Some(Vec<u8>)` on success, and `None on failure.
+    pub fn decrypt(
+        key: [u8; 16],
+        nonce: [u8; 16],
+        ad: &[u8],
+        cipher: &[u8],
+        tag: [u8; 16],
+    ) -> Option<Vec<u8>> {
+        let mut aead128 = Self::new(key, nonce);
+
+        // Initialize
+        aead128.initialize();
+
+        // Process Associated Data
+        aead128.process_adata(ad);
+
+        // Process cipher
+        let plain = aead128.process_cipher(cipher);
+
+        let ptag = aead128.get_tag();
+
+        dbg!(format!(
+            "TAG: 0x{:x}{:x} - PTAG: 0x{:x}{:x}",
+            u64::from_be_bytes(tag[0..8].try_into().unwrap()),
+            u64::from_be_bytes(tag[8..16].try_into().unwrap()),
+            u64::from_be_bytes(ptag[0..8].try_into().unwrap()),
+            u64::from_be_bytes(ptag[8..16].try_into().unwrap()),
+        ));
+
+        (ptag == tag).then_some(plain)
     }
 
     fn process_adata(&mut self, ad: &[u8]) {
@@ -121,37 +159,38 @@ impl AEAD128 {
         if !ad.is_empty() {
             let mut iter = ad.chunks_exact(RATE);
             // Load the exact chunks in S0 and S1 and do 8 rounds.
-            while let Some(c) = iter.next() {
+            for c in iter.by_ref() {
                 t1.copy_from_slice(&c[0..8]);
-                t2.copy_from_slice(&c[8..15]);
+                t2.copy_from_slice(&c[8..16]);
 
                 self.state[0] ^= u64::from_be_bytes(t1);
                 self.state[1] ^= u64::from_be_bytes(t2);
 
                 // Apply 8 rounds to state
-                for i in 0..8 {
-                    Self::round(&mut self.state, ROUND_CONSTANTS[i]);
+                for constant in ROUND_CONSTANTS.into_iter().take(8) {
+                    Self::round(&mut self.state, constant);
                 }
             }
 
             // Pad the last 2 chunks and do 8 rounds.
             let remainder = iter.remainder();
             t1 = [0; 8];
-            t1.copy_from_slice(&remainder[0..]);
             if remainder.len() > 8 {
+                t1.copy_from_slice(&remainder[0..8]);
                 self.state[0] ^= u64::from_be_bytes(t1);
 
                 // Reset t2
                 t2 = [0; 8];
-                t2.copy_from_slice(&remainder[8..]);
+                t2[..(remainder.len() - 8)].copy_from_slice(&remainder[8..]);
                 self.state[1] ^= pad_u64(u64::from_be_bytes(t2), remainder.len() - 8);
             } else {
+                t1[..remainder.len()].copy_from_slice(remainder);
                 self.state[0] ^= pad_u64(u64::from_be_bytes(t1), remainder.len());
             }
 
             // Apply 8 rounds to state
-            for i in 0..8 {
-                Self::round(&mut self.state, ROUND_CONSTANTS[i]);
+            for constant in ROUND_CONSTANTS.into_iter().take(8) {
+                Self::round(&mut self.state, constant);
             }
         }
 
@@ -160,15 +199,15 @@ impl AEAD128 {
     }
 
     // TODO: Do a `Stream`...
-    fn process_plaintext(&mut self, plain: &[u8]) -> Vec<u8> {
+    fn process_plain(&mut self, plain: &[u8]) -> Vec<u8> {
         let mut t1 = [0; 8];
         let mut t2 = [0; 8];
         let mut out = Vec::with_capacity(plain.len());
 
         let mut iter = plain.chunks_exact(16);
-        while let Some(c) = iter.next() {
+        for c in iter.by_ref() {
             t1.copy_from_slice(&c[0..8]);
-            t2.copy_from_slice(&c[8..15]);
+            t2.copy_from_slice(&c[8..16]);
 
             self.state[0] ^= u64::from_be_bytes(t1);
             self.state[1] ^= u64::from_be_bytes(t2);
@@ -176,28 +215,85 @@ impl AEAD128 {
             out.extend_from_slice(&self.state[0].to_be_bytes());
             out.extend_from_slice(&self.state[1].to_be_bytes());
 
-            for i in 0..8 {
-                Self::round(&mut self.state, ROUND_CONSTANTS[i]);
+            for constant in ROUND_CONSTANTS.into_iter().take(8) {
+                Self::round(&mut self.state, constant);
             }
         }
 
         // Pad the last 2 chunks and do 8 rounds.
         let remainder = iter.remainder();
         t1 = [0; 8];
-        t1.copy_from_slice(&remainder[0..]);
         if remainder.len() > 8 {
+            t1.copy_from_slice(&remainder[0..8]);
             self.state[0] ^= u64::from_be_bytes(t1);
 
             // Reset t2
             t2 = [0; 8];
-            t2.copy_from_slice(&remainder[8..]);
+            t2[..(remainder.len() - 8)].copy_from_slice(&remainder[8..]);
             self.state[1] ^= pad_u64(u64::from_be_bytes(t2), remainder.len() - 8);
         } else {
+            t1[..remainder.len()].copy_from_slice(remainder);
             self.state[0] ^= pad_u64(u64::from_be_bytes(t1), remainder.len());
         }
 
         out.extend_from_slice(&self.state[0].to_be_bytes());
         out.extend_from_slice(&self.state[1].to_be_bytes());
+
+        out
+    }
+
+    fn process_cipher(&mut self, cipher: &[u8]) -> Vec<u8> {
+        let mut tmp_bytes = [0; 8];
+        let mut t1;
+        let mut t2;
+
+        let mut out = Vec::with_capacity(cipher.len());
+
+        let mut iter = cipher.chunks_exact(16);
+        for c in iter.by_ref() {
+            tmp_bytes.copy_from_slice(&c[0..8]);
+            t1 = u64::from_be_bytes(tmp_bytes);
+            tmp_bytes.copy_from_slice(&c[8..16]);
+            t2 = u64::from_be_bytes(tmp_bytes);
+
+            out.extend_from_slice(&(self.state[0] ^ t1).to_be_bytes());
+            out.extend_from_slice(&(self.state[1] ^ t2).to_be_bytes());
+
+            self.state[0] = t1;
+            self.state[1] = t2;
+
+            for constant in ROUND_CONSTANTS.into_iter().take(8) {
+                Self::round(&mut self.state, constant);
+            }
+        }
+
+        // Pad the last 2 chunks and do 8 rounds.
+        let remainder = iter.remainder();
+
+        // One full 128 bits left
+        if remainder.len() >= 8 {
+            tmp_bytes.copy_from_slice(&remainder[0..8]);
+            t1 = u64::from_be_bytes(tmp_bytes);
+            out.extend_from_slice(&(self.state[0] ^ t1).to_be_bytes());
+            self.state[0] = t1;
+
+            // This is the not-full one
+            tmp_bytes = [0; 8];
+            tmp_bytes.copy_from_slice(&remainder[8..]);
+            t2 = self.state[1] ^ u64::from_be_bytes(tmp_bytes);
+
+            out.extend_from_slice(&t2.to_be_bytes()[..remainder.len() - 8]);
+            // FIXME: XOR here ?
+            self.state[1] = pad_u64(t2, remainder.len() - 8);
+        } else {
+            tmp_bytes = [0; 8];
+            tmp_bytes[..remainder.len()].copy_from_slice(remainder);
+            t1 = u64::from_be_bytes(tmp_bytes);
+            out.extend_from_slice(&(self.state[0] ^ t1).to_be_bytes());
+
+            // FIXME: XOR here ?
+            self.state[0] = pad_u64(t1, remainder.len());
+        }
 
         out
     }
@@ -208,8 +304,8 @@ impl AEAD128 {
         self.state[3] ^= self.key[1];
 
         // Do the final 12 rounds
-        for i in 0..12 {
-            Self::round(&mut self.state, ROUND_CONSTANTS[i]);
+        for constant in ROUND_CONSTANTS.into_iter().take(12) {
+            Self::round(&mut self.state, constant);
         }
 
         // Finally, XOR the key with S3 and S4 to get the Tag.
@@ -219,7 +315,7 @@ impl AEAD128 {
     /// The tag is the concatenation of S3 and S4.
     pub fn get_tag(&mut self) -> [u8; 16] {
         let mut tag = [0; 16];
-        tag.copy_from_slice(&self.state[3].to_be_bytes());
+        tag[0..8].copy_from_slice(&self.state[3].to_be_bytes());
         tag[8..16].copy_from_slice(&self.state[4].to_be_bytes());
 
         tag
@@ -230,32 +326,14 @@ impl AEAD128 {
         self.state[4] ^= self.key[1];
     }
 
-    fn hash256(m: &[u8]) -> [u8; 32] {
+    fn _hash256(_m: &[u8]) -> [u8; 32] {
         // Initialization
         // Message absorbing
         // Output squeezing
         todo!()
     }
 
-    fn xof128() {
+    fn _xof128() {
         todo!()
-    }
-
-    fn add_constant(&mut self, round: usize) {
-        self.state[2] ^= ROUND_CONSTANTS[round];
-    }
-
-    fn substitute(&mut self) {
-        todo!()
-    }
-
-    fn diffuse(&mut self) {
-        todo!()
-    }
-
-    fn naive_round(&mut self) {
-        // self.add_constant()
-        // self.substitute()
-        // self.diffuse()
     }
 }
