@@ -1,4 +1,5 @@
 use core::fmt;
+use log::{debug, error};
 use std::u64;
 
 use crate::utils::pad_u64;
@@ -98,14 +99,14 @@ impl AEAD128 {
     /// Initialization function for Ascon-AEAD128.
     fn initialize(&mut self) {
         self.state = [IV, self.key[0], self.key[1], self.nonce[0], self.nonce[1]];
-        println!(" init 1st key xor: {}", self);
+        debug!(" init 1st key xor: {}", self);
 
         for constant in ROUND_CONSTANTS.into_iter().take(12) {
             self.round(constant);
         }
 
         self.xor_key();
-        println!(" init 2nd key xor: {}", self);
+        debug!(" init 2nd key xor: {}", self);
     }
 
     /// This is the round function of `Ascon`.
@@ -139,7 +140,7 @@ impl AEAD128 {
         self.state[3] = t3 ^ t3.rotate_right(10) ^ t3.rotate_right(17);
         self.state[4] = t4 ^ t4.rotate_right(7) ^ t4.rotate_right(41);
 
-        println!("     round output: {}", self);
+        debug!("     round output: {}", self);
     }
 
     /// Performs 8 `Ascon` rounds.
@@ -167,6 +168,7 @@ impl AEAD128 {
 
         // Process Plaintext
         let cipher = aead128.process_plain(plain);
+        /*
         println!(
             "cipher = {{{}}}",
             cipher[..std::cmp::min(16, cipher.len())]
@@ -175,6 +177,7 @@ impl AEAD128 {
                 .collect::<Vec<String>>()
                 .join(", ")
         );
+        */
 
         // Finalization
         aead128.finalize();
@@ -210,7 +213,7 @@ impl AEAD128 {
         // Retrieve the tag and compare it with the one we were supposed to have.
         let ptag = aead128.get_tag();
         if ptag != tag {
-            eprintln!(
+            error!(
                 "INVALID TAG: 0x{:x}{:x} - PTAG: 0x{:x}{:x}",
                 u64::from_le_bytes(tag[0..8].try_into().unwrap()),
                 u64::from_le_bytes(tag[8..16].try_into().unwrap()),
@@ -258,7 +261,7 @@ impl AEAD128 {
             t1[..remainder.len()].copy_from_slice(remainder);
             *pt ^= pad_u64(u64::from_le_bytes(t1), remainder.len());
 
-            println!("        pad adata: {}", self);
+            debug!("        pad adata: {}", self);
 
             // Apply 8 rounds to state
             self.do_8_rounds();
@@ -266,7 +269,7 @@ impl AEAD128 {
 
         // Domain separation
         self.state[4] ^= DSEP;
-        println!("domain separation: {}", self);
+        debug!("domain separation: {}", self);
     }
 
     /// This function processes the `plaintext` during `Ascon-AEAD128` encryption.
@@ -287,7 +290,7 @@ impl AEAD128 {
             out.extend_from_slice(&self.state[0].to_le_bytes());
             out.extend_from_slice(&self.state[1].to_le_bytes());
 
-            println!(" absorb plaintext: {}", self);
+            debug!(" absorb plaintext: {}", self);
             self.do_8_rounds();
         }
 
@@ -312,7 +315,7 @@ impl AEAD128 {
 
         out.extend_from_slice(&(*pt).to_le_bytes()[..remainder.len()]);
 
-        println!("    pad plaintext: {}", self);
+        debug!("    pad plaintext: {}", self);
 
         out
     }
@@ -372,7 +375,7 @@ impl AEAD128 {
             *pt = (*pt) & (!0u64 << (8 * remainder.len())) ^ u64::from_le_bytes(tmp_bytes);
         }
 
-        println!("   pad ciphertext: {}", self);
+        debug!("   pad ciphertext: {}", self);
 
         out
     }
@@ -383,7 +386,7 @@ impl AEAD128 {
         self.state[2] ^= self.key[0];
         self.state[3] ^= self.key[1];
 
-        println!("final 1st key xor: {}", self);
+        debug!("final 1st key xor: {}", self);
 
         // Do the final 12 rounds
         for constant in ROUND_CONSTANTS.into_iter().take(12) {
@@ -392,7 +395,7 @@ impl AEAD128 {
 
         // Finally, XOR the key with S3 and S4 to get the Tag.
         self.xor_key();
-        println!("final 2nd key xor: {}", self);
+        debug!("final 2nd key xor: {}", self);
     }
 
     /// The tag is the concatenation of S3 and S4.
@@ -401,6 +404,7 @@ impl AEAD128 {
         tag[0..8].copy_from_slice(&self.state[3].to_le_bytes());
         tag[8..16].copy_from_slice(&self.state[4].to_le_bytes());
 
+        /*
         println!(
             "tag = [{}]",
             tag.iter()
@@ -408,6 +412,7 @@ impl AEAD128 {
                 .collect::<Vec<String>>()
                 .join(", ")
         );
+        */
 
         tag
     }

@@ -14,7 +14,6 @@ fn test_pad_u64() {
 }
 
 fn run_test(key: [u8; 16], nonce: [u8; 16], ad: &[u8], plain: &[u8]) {
-    // dbg!(&key, &nonce, &ad, &plain);
     let (cipher, mut tag) = AEAD128::encrypt(key, nonce, &ad, &plain);
 
     let decipher = AEAD128::decrypt(key, nonce, &ad, &cipher, tag);
