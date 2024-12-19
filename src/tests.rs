@@ -118,66 +118,206 @@ fn test_ad_vector_1() {
     assert!(decipher.is_none());
 }
 
-/*
 #[test]
-fn test_flow() {
-    let mut rng = rand::thread_rng();
-    // Random 20 chars plaintext
-    let plaintext: String = (&mut rng)
-        .sample_iter(&Alphanumeric)
-        .take(20)
-        .map(char::from)
-        .collect();
-    // Random 30 chars Associated data
-    let ad: String = (&mut rng)
-        .sample_iter(&Alphanumeric)
-        .take(30)
-        .map(char::from)
-        .collect();
+fn test_ad_vector_2() {
+    let plain = [];
+    let ad = [0, 1, 2];
+    let key = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    let nonce = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 
-    // Random 16 bytes `key` and `nonce`.
-    let mut key = [0; 16];
-    rng.fill_bytes(&mut key);
-    let mut nonce = [0; 16];
-    rng.fill_bytes(&mut nonce);
+    let (cipher, mut tag) = AEAD128::encrypt(key, nonce, &ad, &plain);
 
-    let (cipher, tag) = AEAD128::encrypt(key, nonce, ad.as_bytes(), plaintext.as_bytes());
-    assert!(!cipher.is_empty());
+    // Cipher should be empty because `plain` was empty.
+    assert!(cipher.is_empty());
 
-    let decipher = AEAD128::decrypt(key, nonce, ad.as_bytes(), &cipher, tag);
+    assert_eq!(
+        tag,
+        [
+            0xae, 0x21, 0x4c, 0x9f, 0x66, 0x63, 0x06, 0x58, 0xed, 0x8d, 0xc7, 0xd3, 0x11, 0x31,
+            0x17, 0x4c
+        ]
+    );
 
+    let decipher = AEAD128::decrypt(key, nonce, &ad, &cipher, tag);
     assert!(decipher.is_some());
 
     let decipher = decipher.unwrap();
+    // Same, deciphered should be empty.
+    assert!(decipher.is_empty());
+    assert_eq!(plain.to_vec(), decipher);
 
-    assert_eq!(plaintext.as_bytes(), decipher);
+    // Try deciphering with after altering the `tag`. This should fail.
+    tag[0] += 1;
+    let decipher = AEAD128::decrypt(key, nonce, &ad, &cipher, tag);
+    assert!(decipher.is_none());
 }
-*/
 
-/*
 #[test]
-fn _test_hash256() {
-        Ascon-Hash("")
-    0x 7346bc14f036e87ae03d0997913088f5f68411434b3cf8b54fa796a80d251f91
-    Ascon-HashA("")
-    0x aecd027026d0675f9de7a8ad8ccf512db64b1edcf0b20c388a0c7cc617aaa2c4
-    Ascon-Hash("The quick brown fox jumps over the lazy dog")
-    0x 3375fb43372c49cbd48ac5bb6774e7cf5702f537b2cf854628edae1bd280059e
-    Ascon-Hash("The quick brown fox jumps over the lazy dog.")
-    0x c9744340ed476ac235dd979d12f5010a7523146ee90b57ccc4faeb864efcd048
+fn test_ad_vector_3() {
+    let plain = [];
+    let ad = [0, 1, 2, 3];
+    let key = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    let nonce = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 
-    assert!(true);
+    let (cipher, mut tag) = AEAD128::encrypt(key, nonce, &ad, &plain);
+
+    // Cipher should be empty because `plain` was empty.
+    assert!(cipher.is_empty());
+
+    assert_eq!(
+        tag,
+        [
+            0xc6, 0xff, 0x3c, 0xf7, 0x05, 0x75, 0xb1, 0x44, 0xb9, 0x55, 0x82, 0x0d, 0x9b, 0xc7,
+            0x68, 0x5e
+        ]
+    );
+
+    let decipher = AEAD128::decrypt(key, nonce, &ad, &cipher, tag);
+    assert!(decipher.is_some());
+
+    let decipher = decipher.unwrap();
+    // Same, deciphered should be empty.
+    assert!(decipher.is_empty());
+    assert_eq!(plain.to_vec(), decipher);
+
+    // Try deciphering with after altering the `tag`. This should fail.
+    tag[0] += 1;
+    let decipher = AEAD128::decrypt(key, nonce, &ad, &cipher, tag);
+    assert!(decipher.is_none());
 }
-        */
 
-/*
 #[test]
-fn test_xof128() {
-    Ascon-Xof("", 32)
-    0x 5d4cbde6350ea4c174bd65b5b332f8408f99740b81aa02735eaefbcf0ba0339e
-    Ascon-XofA("", 32)
-    0x 7c10dffd6bb03be262d72fbe1b0f530013c6c4eadaabde278d6f29d579e3908d
+fn test_ad9_vector() {
+    let plain = [];
+    let ad = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+    let key = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    let nonce = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 
-    assert!(true);
+    let (cipher, mut tag) = AEAD128::encrypt(key, nonce, &ad, &plain);
+
+    // Cipher should be empty because `plain` was empty.
+    assert!(cipher.is_empty());
+
+    assert_eq!(
+        tag,
+        [
+            0x19, 0x9b, 0x9f, 0x81, 0x5b, 0xa3, 0x7a, 0x38, 0x6d, 0x28, 0x3f, 0x50, 0x4b, 0x8d,
+            0x22, 0x77
+        ]
+    );
+
+    let decipher = AEAD128::decrypt(key, nonce, &ad, &cipher, tag);
+    assert!(decipher.is_some());
+
+    let decipher = decipher.unwrap();
+    // Same, deciphered should be empty.
+    assert!(decipher.is_empty());
+    assert_eq!(plain.to_vec(), decipher);
+
+    // Try deciphering with after altering the `tag`. This should fail.
+    tag[0] += 1;
+    let decipher = AEAD128::decrypt(key, nonce, &ad, &cipher, tag);
+    assert!(decipher.is_none());
 }
-    */
+
+#[test]
+fn test_adf_vector() {
+    let plain = [];
+    let ad = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    let key = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    let nonce = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+
+    let (cipher, mut tag) = AEAD128::encrypt(key, nonce, &ad, &plain);
+
+    // Cipher should be empty because `plain` was empty.
+    assert!(cipher.is_empty());
+
+    assert_eq!(
+        tag,
+        [
+            0xb7, 0x47, 0xd3, 0x23, 0x5e, 0x97, 0x1c, 0x20, 0xd0, 0x0d, 0xcf, 0x87, 0x40, 0x69,
+            0x38, 0xfd
+        ]
+    );
+
+    let decipher = AEAD128::decrypt(key, nonce, &ad, &cipher, tag);
+    assert!(decipher.is_some());
+
+    let decipher = decipher.unwrap();
+    // Same, deciphered should be empty.
+    assert!(decipher.is_empty());
+    assert_eq!(plain.to_vec(), decipher);
+
+    // Try deciphering with after altering the `tag`. This should fail.
+    tag[0] += 1;
+    let decipher = AEAD128::decrypt(key, nonce, &ad, &cipher, tag);
+    assert!(decipher.is_none());
+}
+
+#[test]
+fn test_ad10_vector() {
+    let plain = [];
+    let ad = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+    let key = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    let nonce = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+
+    let (cipher, mut tag) = AEAD128::encrypt(key, nonce, &ad, &plain);
+
+    // Cipher should be empty because `plain` was empty.
+    assert!(cipher.is_empty());
+
+    assert_eq!(
+        tag,
+        [
+            0xd9, 0x90, 0xa2, 0x42, 0x65, 0x4d, 0x07, 0x41, 0xc7, 0x52, 0x5e, 0x6f, 0x90, 0x36,
+            0x53, 0xed
+        ]
+    );
+
+    let decipher = AEAD128::decrypt(key, nonce, &ad, &cipher, tag);
+    assert!(decipher.is_some());
+
+    let decipher = decipher.unwrap();
+    // Same, deciphered should be empty.
+    assert!(decipher.is_empty());
+    assert_eq!(plain.to_vec(), decipher);
+
+    // Try deciphering with after altering the `tag`. This should fail.
+    tag[0] += 1;
+    let decipher = AEAD128::decrypt(key, nonce, &ad, &cipher, tag);
+    assert!(decipher.is_none());
+}
+
+#[test]
+fn test_plain_vector() {
+    let plain = [0];
+    let ad = [];
+    let key = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    let nonce = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+
+    let (cipher, mut tag) = AEAD128::encrypt(key, nonce, &ad, &plain);
+
+    // Cipher should be empty because `plain` was empty.
+    assert_eq!(cipher.len(), plain.len());
+
+    assert_eq!(cipher, [0xe7]);
+    assert_eq!(
+        tag,
+        [
+            0x9f, 0x58, 0xf1, 0xf5, 0x41, 0xfc, 0x51, 0xb5, 0xd4, 0x38, 0xf8, 0xe1, 0xdd, 0x03,
+            0xf1, 0x47
+        ]
+    );
+
+    let decipher = AEAD128::decrypt(key, nonce, &ad, &cipher, tag);
+    assert!(decipher.is_some());
+
+    let decipher = decipher.unwrap();
+    dbg!(&decipher);
+    assert_eq!(plain.to_vec(), decipher);
+
+    // Try deciphering with after altering the `tag`. This should fail.
+    tag[0] += 1;
+    let decipher = AEAD128::decrypt(key, nonce, &ad, &cipher, tag);
+    assert!(decipher.is_none());
+}

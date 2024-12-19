@@ -1,4 +1,5 @@
 use core::fmt;
+use std::u64;
 
 use crate::utils::pad_u64;
 
@@ -202,7 +203,7 @@ impl AEAD128 {
 
             if remainder.len() >= 8 {
                 t1.copy_from_slice(&remainder[0..8]);
-                *pt ^= u64::from_be_bytes(t1);
+                *pt ^= u64::from_le_bytes(t1);
                 remainder = &remainder[8..];
                 pt = &mut self.state[1];
             }
@@ -219,22 +220,21 @@ impl AEAD128 {
 
         // Domain separation
         self.state[4] ^= DSEP;
-        println!(" domain separation: {}", self);
+        println!("domain separation: {}", self);
     }
 
     // TODO: Do a `Stream`...
     fn process_plain(&mut self, plain: &[u8]) -> Vec<u8> {
         let mut t1 = [0; 8];
-        let mut t2 = [0; 8];
         let mut out = Vec::with_capacity(plain.len());
 
         let mut iter = plain.chunks_exact(16);
         for c in iter.by_ref() {
             t1.copy_from_slice(&c[0..8]);
-            t2.copy_from_slice(&c[8..16]);
+            self.state[0] ^= u64::from_le_bytes(t1);
 
-            self.state[0] ^= u64::from_be_bytes(t1);
-            self.state[1] ^= u64::from_be_bytes(t2);
+            t1.copy_from_slice(&c[8..16]);
+            self.state[1] ^= u64::from_le_bytes(t1);
 
             out.extend_from_slice(&self.state[0].to_be_bytes());
             out.extend_from_slice(&self.state[1].to_be_bytes());
@@ -247,19 +247,25 @@ impl AEAD128 {
         // Pad the last 2 chunks and do 8 rounds.
         let mut remainder = iter.remainder();
         let mut pt = &mut self.state[0];
-        t1 = [0; 8];
+
         if remainder.len() >= 8 {
+            t1 = [0; 8];
             t1.copy_from_slice(&remainder[0..8]);
-            *pt ^= u64::from_be_bytes(t1);
+            *pt ^= u64::from_le_bytes(t1);
+
             out.extend_from_slice(&self.state[0].to_be_bytes());
+
             remainder = &remainder[8..];
             pt = &mut self.state[1];
         }
 
         t1 = [0; 8];
         t1[..remainder.len()].copy_from_slice(remainder);
-        *pt ^= pad_u64(u64::from_be_bytes(t1), remainder.len());
-        out.extend_from_slice(&(*pt).to_be_bytes()[..remainder.len()]);
+        *pt ^= pad_u64(u64::from_le_bytes(t1), remainder.len());
+        // to LE ?
+        out.extend_from_slice(&(*pt).to_le_bytes()[..remainder.len()]);
+
+        println!("    pad plaintext: {}", self);
 
         out
     }
@@ -290,32 +296,36 @@ impl AEAD128 {
         }
 
         // Pad the last 2 chunks and do 8 rounds.
-        let remainder = iter.remainder();
+        let mut remainder = iter.remainder();
+        let mut pt = &mut self.state[0];
 
-        // One full 128 bits left
-        // TODO: There are some optis possible here!
         if remainder.len() >= 8 {
+            tmp_bytes = [0; 8];
             tmp_bytes.copy_from_slice(&remainder[0..8]);
-            t1 = u64::from_be_bytes(tmp_bytes);
-            out.extend_from_slice(&(self.state[0] ^ t1).to_be_bytes());
-            self.state[0] = t1;
 
-            // This is the not-full one
-            tmp_bytes = [0; 8];
-            tmp_bytes[..(remainder.len() - 8)].copy_from_slice(&remainder[8..]);
+            out.extend(
+                pt.to_be_bytes()
+                    .iter()
+                    .zip(&remainder[0..8])
+                    .map(|(s, t)| s ^ t),
+            );
+            *pt = u64::from_be_bytes(tmp_bytes);
 
-            t2 = self.state[1] ^ u64::from_be_bytes(tmp_bytes);
-
-            out.extend_from_slice(&t2.to_be_bytes()[..remainder.len() - 8]);
-            self.state[1] ^= pad_u64(t2, remainder.len() - 8);
-        } else {
-            tmp_bytes = [0; 8];
-            tmp_bytes[..remainder.len()].copy_from_slice(remainder);
-            t1 = u64::from_be_bytes(tmp_bytes);
-            out.extend_from_slice(&(self.state[0] ^ t1).to_be_bytes()[..remainder.len()]);
-
-            self.state[0] ^= pad_u64(t1, remainder.len());
+            remainder = &remainder[8..];
+            pt = &mut self.state[1];
         }
+
+        *pt = pad_u64(*pt, remainder.len());
+
+        tmp_bytes = [0; 8];
+        tmp_bytes[..remainder.len()].copy_from_slice(remainder);
+
+        out.extend(
+            remainder
+                .iter()
+                .zip((*pt).to_le_bytes())
+                .map(|(t, s)| t ^ s),
+        );
 
         println!("   pad ciphertext: {}", self);
 
