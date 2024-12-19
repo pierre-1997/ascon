@@ -187,66 +187,26 @@ fn test_plain16_ad16_vector() {
     run_test(key, nonce, &ad, &plain);
 }
 
-/*
 #[test]
-fn test_plain1_vector() {
-    let plain = [0, 1, 2,3,4,5,6,7,8,9,10,11,12,13,14,15,16];
-    let ad = [];
-    let key = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-    let nonce = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+fn test_plain32_ad32_vector() {
+    let key = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f,
+    ];
+    let nonce = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f,
+    ];
+    let ad = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d,
+        0x1e, 0x1f,
+    ];
+    let plain = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d,
+        0x1e, 0x1f,
+    ];
 
     run_test(key, nonce, &ad, &plain);
 }
-#[test]
-fn test_plain1_vector() {
-    let plain = [0, 1, 2,3,4,5,6,7,8,9,10,11,12,13,14,15,16];
-    let ad = [];
-    let key = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-    let nonce = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-
-    run_test(key, nonce, &ad, &plain);
-}
-*/
-
-/*
-#[test]
-fn test_plain_ad10_vector() {
-    let plain = [0];
-    let ad = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-    let key = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-    let nonce = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-
-    let (mut cipher, mut tag) = AEAD128::encrypt(key, nonce, &ad, &plain);
-
-    // Cipher should be empty because `plain` was empty.
-    assert_eq!(cipher.len(), plain.len());
-
-    assert_eq!(cipher, [0x98]);
-    assert_eq!(
-        tag,
-        [
-            0xbd, 0x6c, 0xb9, 0xc3, 0x87, 0xd7, 0x1d, 0x27, 0x5a, 0x5d, 0x50, 0xe5, 0x52, 0x5c,
-            0x64, 0x3c
-        ]
-    );
-
-    let decipher = AEAD128::decrypt(key, nonce, &ad, &cipher, tag);
-    assert!(decipher.is_some());
-
-    let decipher = decipher.unwrap();
-    assert_eq!(plain.to_vec(), decipher);
-
-    // Deciphering altered ciphertext
-    cipher[0] += 1;
-    let decipher = AEAD128::decrypt(key, nonce, &ad, &cipher, tag);
-    assert!(decipher.is_none());
-
-    /* let decipher = decipher.unwrap();
-    assert_eq!(decipher, vec![0x01]); */
-
-    // Try deciphering with after altering the `tag`. This should fail.
-    tag[0] += 1;
-    let decipher = AEAD128::decrypt(key, nonce, &ad, &cipher, tag);
-    assert!(decipher.is_none());
-}
-*/

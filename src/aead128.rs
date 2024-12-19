@@ -5,22 +5,42 @@ use crate::utils::pad_u64;
 
 #[derive(Debug)]
 pub struct AEAD128 {
+    /// 128 bits symmetric key.
     key: [u64; 2],
+    /// 128 bits random nonce.
     nonce: [u64; 2],
+    /// 320 bits state.
     state: [u64; 5],
 }
 
 const RATE: usize = 16;
 
+/// This is the initialization vector of `Ascon-AEAD128`.
+/// With, `v`, `a`, `b`, `t`, `r/8` as:
+/// - `v`: Unique identifier of the algorithm.
+/// - `a`: Number of rounds during initialization and finalization.
+/// - `b`: Number of rounds during the processing of `Associated Data`, plaintext and ciphertext.
+/// - `t`: 128 for `Ascon-AEAD128` (arbitrary?).
+/// - `r/8`: Number of input bytes processed per invocation of the underlying permutation.
+///
+/// For `Ascon-AEAD128`, these values are:
+/// |    v     |     a    |     b    |     t     |    r/8   |
+/// | (8 bits) | (4 bits) | (4 bits) | (16 bits) | (8 bits) |
+/// | 1        |   12     |     8    |    128    |    16    |
 const IV: u64 = 0x00001000808c0001;
+
+/// Domain separation constant (which is XORed with `state[4]`).
 const DSEP: u64 = 0x80u64 << 56;
 
+/// These are the round constants used in the `Ascon` permutation.
+///
 const ROUND_CONSTANTS: [u64; 12] = [
     /*
-     * 0x000000000000003c,
-     * 0x000000000000002d,
-     * 0x000000000000001e,
-     * 0x000000000000000f,
+     * These 4 round constants are never used because we only go up to 12 rounds max:
+     * - 0x000000000000003c,
+     * - 0x000000000000002d,
+     * - 0x000000000000001e,
+     * - 0x000000000000000f,
      */
     0x00000000000000f0,
     0x00000000000000e1,
@@ -36,6 +56,7 @@ const ROUND_CONSTANTS: [u64; 12] = [
     0x000000000000004b,
 ];
 
+/// Displays the internal 5 word state.
 impl fmt::Display for AEAD128 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -47,6 +68,7 @@ impl fmt::Display for AEAD128 {
 }
 
 impl AEAD128 {
+    /// Instanciate a new Ascon-AEAD128.
     fn new(key: [u8; 16], nonce: [u8; 16]) -> Self {
         let key = [
             u64::from_le_bytes([
@@ -73,9 +95,9 @@ impl AEAD128 {
         }
     }
 
+    /// Initialization function for Ascon-AEAD128.
     fn initialize(&mut self) {
         self.state = [IV, self.key[0], self.key[1], self.nonce[0], self.nonce[1]];
-
         println!(" init 1st key xor: {}", self);
 
         for constant in ROUND_CONSTANTS.into_iter().take(12) {
@@ -86,6 +108,9 @@ impl AEAD128 {
         println!(" init 2nd key xor: {}", self);
     }
 
+    /// This is the round function of `Ascon`.
+    ///
+    /// (TODO: Write about the number of temp variables used.)
     fn round(&mut self, round_constant: u64) {
         // Constant Addition Layer
         self.state[2] ^= round_constant;
@@ -104,7 +129,7 @@ impl AEAD128 {
         t1 ^= t0;
         t0 ^= t4;
         t3 ^= t2;
-        // NOTE: `ascon-c`a does this one **after** the linear diffuse. Why?
+        // NOTE: `ascon-c` does this one **after** the linear diffuse. Why?
         t2 = !t2;
 
         // Linear Diffusion Layer
@@ -117,12 +142,20 @@ impl AEAD128 {
         println!("     round output: {}", self);
     }
 
+    /// Performs 8 `Ascon` rounds.
+    ///
+    /// TODO: This should maybe moved to `do_n_rounds()` with the correct logic?
     fn do_8_rounds(&mut self) {
         for i in 4..12 {
             self.round(ROUND_CONSTANTS[i]);
         }
     }
 
+    /// This function performs `Ascon-AEAD128` encryption.
+    ///
+    /// Returns `(ciphertext, tag)` as:
+    /// - `ciphertext` (`Vec<u8>`): The encrypted bytes.
+    /// - `tag` (`[u8; 16]`): The associated authentication tag.
     pub fn encrypt(key: [u8; 16], nonce: [u8; 16], ad: &[u8], plain: &[u8]) -> (Vec<u8>, [u8; 16]) {
         let mut aead128 = Self::new(key, nonce);
 
@@ -134,7 +167,6 @@ impl AEAD128 {
 
         // Process Plaintext
         let cipher = aead128.process_plain(plain);
-
         println!(
             "cipher = {{{}}}",
             cipher[..std::cmp::min(16, cipher.len())]
@@ -143,13 +175,17 @@ impl AEAD128 {
                 .collect::<Vec<String>>()
                 .join(", ")
         );
-        // Finalize
+
+        // Finalization
         aead128.finalize();
 
+        // Return the encrypted bytes along its authentication tag.
         (cipher, aead128.get_tag())
     }
 
-    /// Returns `Some(Vec<u8>)` on success, and `None on failure.
+    /// This function performs `Ascon-AEAD128` decryption.
+    ///
+    /// Returns `Some(plaintext)` on success, and `None on failure.
     pub fn decrypt(
         key: [u8; 16],
         nonce: [u8; 16],
@@ -168,8 +204,10 @@ impl AEAD128 {
         // Process cipher
         let plain = aead128.process_cipher(cipher);
 
+        // Finalization
         aead128.finalize();
 
+        // Retrieve the tag and compare it with the one we were supposed to have.
         let ptag = aead128.get_tag();
         if ptag != tag {
             eprintln!(
@@ -184,6 +222,7 @@ impl AEAD128 {
         (ptag == tag).then_some(plain)
     }
 
+    /// This performs the `Associated Data` absorption of the `Ascon-AEAD128` algorithm.
     fn process_adata(&mut self, ad: &[u8]) {
         // We only need 2 temporary u64 in total.
         let mut t1 = [0; 8];
@@ -230,7 +269,9 @@ impl AEAD128 {
         println!("domain separation: {}", self);
     }
 
-    // TODO: Do a `Stream`...
+    /// This function processes the `plaintext` during `Ascon-AEAD128` encryption.
+    ///
+    /// TODO: Do a `Stream`...
     fn process_plain(&mut self, plain: &[u8]) -> Vec<u8> {
         let mut t1 = [0; 8];
         let mut out = Vec::with_capacity(plain.len());
@@ -276,6 +317,7 @@ impl AEAD128 {
         out
     }
 
+    /// This function processes the `ciphertext` during `Ascon-AEAD128` decryption.
     fn process_cipher(&mut self, cipher: &[u8]) -> Vec<u8> {
         let mut tmp_bytes = [0; 8];
         let mut t1;
@@ -335,6 +377,7 @@ impl AEAD128 {
         out
     }
 
+    /// This is the finalization step of the `Ascon-AEAD128` algorithm.
     fn finalize(&mut self) {
         // XOR the key with S2 and S3
         self.state[2] ^= self.key[0];
@@ -369,19 +412,9 @@ impl AEAD128 {
         tag
     }
 
+    /// This small function just XORs the key with the last two `state` words.
     fn xor_key(&mut self) {
         self.state[3] ^= self.key[0];
         self.state[4] ^= self.key[1];
-    }
-
-    fn _hash256(_m: &[u8]) -> [u8; 32] {
-        // Initialization
-        // Message absorbing
-        // Output squeezing
-        todo!()
-    }
-
-    fn _xof128() {
-        todo!()
     }
 }
