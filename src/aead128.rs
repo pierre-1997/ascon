@@ -1,8 +1,10 @@
-use core::fmt;
 use log::{debug, error};
 use std::u64;
 
-use crate::utils::pad_u64;
+use crate::{
+    round::{self, state_to_str},
+    utils::pad_u64,
+};
 
 #[derive(Debug)]
 pub struct AEAD128 {
@@ -10,7 +12,7 @@ pub struct AEAD128 {
     key: [u64; 2],
     /// 128 bits random nonce.
     nonce: [u64; 2],
-    /// 320 bits state.
+    /// 320 bits internal state.
     state: [u64; 5],
 }
 
@@ -32,41 +34,6 @@ const IV: u64 = 0x00001000808c0001;
 
 /// Domain separation constant (which is XORed with `state[4]`).
 const DSEP: u64 = 0x80u64 << 56;
-
-/// These are the round constants used in the `Ascon` permutation.
-///
-const ROUND_CONSTANTS: [u64; 12] = [
-    /*
-     * These 4 round constants are never used because we only go up to 12 rounds max:
-     * - 0x000000000000003c,
-     * - 0x000000000000002d,
-     * - 0x000000000000001e,
-     * - 0x000000000000000f,
-     */
-    0x00000000000000f0,
-    0x00000000000000e1,
-    0x00000000000000d2,
-    0x00000000000000c3,
-    0x00000000000000b4,
-    0x00000000000000a5,
-    0x0000000000000096,
-    0x0000000000000087,
-    0x0000000000000078,
-    0x0000000000000069,
-    0x000000000000005a,
-    0x000000000000004b,
-];
-
-/// Displays the internal 5 word state.
-impl fmt::Display for AEAD128 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "x0=0x{:x} x1=0x{:x} x2=0x{:x} x3=0x{:x} x4=0x{:x}",
-            self.state[0], self.state[1], self.state[2], self.state[3], self.state[4]
-        )
-    }
-}
 
 impl AEAD128 {
     /// Instanciate a new Ascon-AEAD128.
@@ -99,57 +66,12 @@ impl AEAD128 {
     /// Initialization function for Ascon-AEAD128.
     fn initialize(&mut self) {
         self.state = [IV, self.key[0], self.key[1], self.nonce[0], self.nonce[1]];
-        debug!(" init 1st key xor: {}", self);
+        debug!(" init 1st key xor: {}", state_to_str(&self.state));
 
-        for constant in ROUND_CONSTANTS.into_iter().take(12) {
-            self.round(constant);
-        }
+        round::do_n_rounds(&mut self.state, 12);
 
         self.xor_key();
-        debug!(" init 2nd key xor: {}", self);
-    }
-
-    /// This is the round function of `Ascon`.
-    ///
-    /// (TODO: Write about the number of temp variables used.)
-    fn round(&mut self, round_constant: u64) {
-        // Constant Addition Layer
-        self.state[2] ^= round_constant;
-
-        // Substitution Layer (S-Box)
-        self.state[0] ^= self.state[4];
-        self.state[2] ^= self.state[1];
-        self.state[4] ^= self.state[3];
-
-        let mut t0 = self.state[0] ^ (!self.state[1] & self.state[2]);
-        let mut t1 = self.state[1] ^ (!self.state[2] & self.state[3]);
-        let mut t2 = self.state[2] ^ (!self.state[3] & self.state[4]);
-        let mut t3 = self.state[3] ^ (!self.state[4] & self.state[0]);
-        let t4 = self.state[4] ^ (!self.state[0] & self.state[1]);
-
-        t1 ^= t0;
-        t0 ^= t4;
-        t3 ^= t2;
-        // NOTE: `ascon-c` does this one **after** the linear diffuse. Why?
-        t2 = !t2;
-
-        // Linear Diffusion Layer
-        self.state[0] = t0 ^ t0.rotate_right(19) ^ t0.rotate_right(28);
-        self.state[1] = t1 ^ t1.rotate_right(61) ^ t1.rotate_right(39);
-        self.state[2] = t2 ^ t2.rotate_right(1) ^ t2.rotate_right(6);
-        self.state[3] = t3 ^ t3.rotate_right(10) ^ t3.rotate_right(17);
-        self.state[4] = t4 ^ t4.rotate_right(7) ^ t4.rotate_right(41);
-
-        debug!("     round output: {}", self);
-    }
-
-    /// Performs 8 `Ascon` rounds.
-    ///
-    /// TODO: This should maybe moved to `do_n_rounds()` with the correct logic?
-    fn do_8_rounds(&mut self) {
-        for i in 4..12 {
-            self.round(ROUND_CONSTANTS[i]);
-        }
+        debug!(" init 2nd key xor: {}", state_to_str(&self.state));
     }
 
     /// This function performs `Ascon-AEAD128` encryption.
@@ -242,7 +164,7 @@ impl AEAD128 {
                 self.state[1] ^= u64::from_le_bytes(t2);
 
                 // Apply 8 rounds to state
-                self.do_8_rounds();
+                round::do_n_rounds(&mut self.state, 8);
             }
 
             // Pad the last 2 chunks and do 8 rounds.
@@ -261,15 +183,15 @@ impl AEAD128 {
             t1[..remainder.len()].copy_from_slice(remainder);
             *pt ^= pad_u64(u64::from_le_bytes(t1), remainder.len());
 
-            debug!("        pad adata: {}", self);
+            debug!("        pad adata: {}", state_to_str(&self.state));
 
             // Apply 8 rounds to state
-            self.do_8_rounds();
+            round::do_n_rounds(&mut self.state, 8);
         }
 
         // Domain separation
         self.state[4] ^= DSEP;
-        debug!("domain separation: {}", self);
+        debug!("domain separation: {}", state_to_str(&self.state));
     }
 
     /// This function processes the `plaintext` during `Ascon-AEAD128` encryption.
@@ -290,8 +212,8 @@ impl AEAD128 {
             out.extend_from_slice(&self.state[0].to_le_bytes());
             out.extend_from_slice(&self.state[1].to_le_bytes());
 
-            debug!(" absorb plaintext: {}", self);
-            self.do_8_rounds();
+            debug!(" absorb plaintext: {}", state_to_str(&self.state));
+            round::do_n_rounds(&mut self.state, 8);
         }
 
         // Pad the last 2 chunks and do 8 rounds.
@@ -315,7 +237,7 @@ impl AEAD128 {
 
         out.extend_from_slice(&(*pt).to_le_bytes()[..remainder.len()]);
 
-        debug!("    pad plaintext: {}", self);
+        debug!("    pad plaintext: {}", state_to_str(&self.state));
 
         out
     }
@@ -339,7 +261,7 @@ impl AEAD128 {
             out.extend_from_slice(&(self.state[1] ^ t1).to_le_bytes());
             self.state[1] = t1;
 
-            self.do_8_rounds();
+            round::do_n_rounds(&mut self.state, 8)
         }
 
         // Pad the last 2 chunks and do 8 rounds.
@@ -375,7 +297,7 @@ impl AEAD128 {
             *pt = (*pt) & (!0u64 << (8 * remainder.len())) ^ u64::from_le_bytes(tmp_bytes);
         }
 
-        debug!("   pad ciphertext: {}", self);
+        debug!("   pad ciphertext: {}", state_to_str(&self.state));
 
         out
     }
@@ -386,16 +308,14 @@ impl AEAD128 {
         self.state[2] ^= self.key[0];
         self.state[3] ^= self.key[1];
 
-        debug!("final 1st key xor: {}", self);
+        debug!("final 1st key xor: {}", state_to_str(&self.state));
 
         // Do the final 12 rounds
-        for constant in ROUND_CONSTANTS.into_iter().take(12) {
-            self.round(constant);
-        }
+        round::do_n_rounds(&mut self.state, 12);
 
         // Finally, XOR the key with S3 and S4 to get the Tag.
         self.xor_key();
-        debug!("final 2nd key xor: {}", self);
+        debug!("final 2nd key xor: {}", state_to_str(&self.state));
     }
 
     /// The tag is the concatenation of S3 and S4.
